@@ -113,6 +113,18 @@ final class SafetyTest extends TestCase
         $this->assertSame(5000, $payload['operations'][0]['count']);
     }
 
+    public function testMongoInstrumentationLoadsWithoutTheExtension(): void
+    {
+        $source = realpath(__DIR__ . '/../src/Instrument/Mongo.php');
+        $code = sprintf(
+            'require %s; exit(class_exists("Sixty\\Instrument\\Mongo") ? 0 : 9);',
+            var_export($source, true),
+        );
+        $command = escapeshellarg(PHP_BINARY) . ' -n -r ' . escapeshellarg($code);
+        exec($command, $output, $status);
+        $this->assertSame(0, $status, 'the optional Mongo adapter caused a fatal error without ext-mongodb');
+    }
+
     /**
      * A number rather than a promise. The threshold is deliberately loose —
      * this is a regression guard against something pathological (a backtrace

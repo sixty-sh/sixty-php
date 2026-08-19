@@ -52,7 +52,7 @@ use Sixty\Tracer;
  * somebody's query values to compose a command out of them — the same trade
  * refused for MySQL, refused again here.
  */
-final class Mongo implements CommandSubscriber
+final class Mongo
 {
     /** Commands the driver issues about itself. */
     private const IGNORED = [
@@ -92,6 +92,7 @@ final class Mongo implements CommandSubscriber
     private const MAX_OPEN_CURSORS = 128;
 
     private static ?self $subscriber = null;
+    private static ?object $driverSubscriber = null;
 
     /** @var array<string, array<string, mixed>> keyed by request id */
     private array $inFlight = [];
@@ -100,15 +101,23 @@ final class Mongo implements CommandSubscriber
 
     public static function install(): bool
     {
-        if (self::$subscriber !== null || !class_exists(\MongoDB\Driver\Manager::class)) {
+        if (self::$subscriber !== null || !class_exists(\MongoDB\Driver\Manager::class) || !interface_exists(CommandSubscriber::class)) {
             return false;
         }
         if (!function_exists('MongoDB\Driver\Monitoring\addSubscriber')) {
             return false;
         }
 
-        self::$subscriber = new self();
-        \MongoDB\Driver\Monitoring\addSubscriber(self::$subscriber);
+        $mongo = new self();
+        $driverSubscriber = new class($mongo) implements CommandSubscriber {
+            public function __construct(private Mongo $mongo) {}
+            public function commandStarted(CommandStartedEvent $event): void { $this->mongo->commandStarted($event); }
+            public function commandSucceeded(CommandSucceededEvent $event): void { $this->mongo->commandSucceeded($event); }
+            public function commandFailed(CommandFailedEvent $event): void { $this->mongo->commandFailed($event); }
+        };
+        self::$subscriber = $mongo;
+        self::$driverSubscriber = $driverSubscriber;
+        \MongoDB\Driver\Monitoring\addSubscriber($driverSubscriber);
 
         return true;
     }
@@ -120,10 +129,11 @@ final class Mongo implements CommandSubscriber
 
     public static function reset(): void
     {
-        if (self::$subscriber !== null && function_exists('MongoDB\Driver\Monitoring\removeSubscriber')) {
-            \MongoDB\Driver\Monitoring\removeSubscriber(self::$subscriber);
+        if (self::$driverSubscriber !== null && function_exists('MongoDB\Driver\Monitoring\removeSubscriber')) {
+            \MongoDB\Driver\Monitoring\removeSubscriber(self::$driverSubscriber);
         }
         self::$subscriber = null;
+        self::$driverSubscriber = null;
     }
 
     public function commandStarted(CommandStartedEvent $event): void
